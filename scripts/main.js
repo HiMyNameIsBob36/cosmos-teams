@@ -120,23 +120,23 @@ function handleCommand(player, args) {
             if (!invT) return player.sendMessage("§cPlayer not found.");
             player.sendMessage(`§b- - - ${invT.name}'s Inventory - - -`);
             
-            const containers = [
-                { name: "Inv", cont: invT.getComponent("inventory").container },
-                { name: "Armor", cont: invT.getComponent("equippable") }
-            ];
+            const invComp = invT.getComponent("inventory");
+            const equipComp = invT.getComponent("equippable");
 
-            // MAIN INV
-            for (let i = 0; i < containers[0].cont.size; i++) {
-                const item = containers[0].cont.getItem(i);
-                if (item) formatItem(player, item);
+            if (invComp && invComp.container) {
+                for (let i = 0; i < invComp.container.size; i++) {
+                    const item = invComp.container.getItem(i);
+                    if (item) formatItem(player, item);
+                }
             }
-            // ARMOR + OFFHAND
-            const equip = containers[1].cont;
-            const slots = ["Head", "Chest", "Legs", "Feet", "Offhand"];
-            slots.forEach(slot => {
-                const item = equip.getEquipment(slot);
-                if (item) formatItem(player, item, slot);
-            });
+            
+            if (equipComp) {
+                const slots = ["Head", "Chest", "Legs", "Feet", "Offhand"];
+                slots.forEach(slot => {
+                    const item = equipComp.getEquipment(slot);
+                    if (item) formatItem(player, item, slot.toUpperCase());
+                });
+            }
             break;
 
         case "punish":
@@ -146,8 +146,8 @@ function handleCommand(player, args) {
             const reason = args.slice(3).join(" ") || "No reason";
             if (!pTarget || !["warn", "kick", "ban", "mute", "shadowmute", "tempban"].includes(pType)) return player.sendMessage("§cUsage: .punish [name] [type] [reason]");
             
-            let h = pTarget.getDynamicProperty("history") || "";
-            if (h.trim() === "CLEAN") h = "";
+            let h = pTarget.getDynamicProperty("history") || "CLEAN";
+            if (h === "CLEAN") h = "";
             pTarget.setDynamicProperty("history", h + `${pType.toUpperCase()} - ${reason}\n`);
             
             if (pType === "warn") {
@@ -212,7 +212,8 @@ function formatItem(player, item, slotName = "") {
     if (enchants) {
         const list = enchants.getEnchantments();
         if (list.length > 0) {
-            msg += " §d" + list.map(e => `${e.type.id.split(":")[1]}${e.level}`).join(" ");
+            // Using e.type.id (or e.typeId depending on build) to avoid undefined
+            msg += " §d" + list.map(e => `${(e.type?.id || e.typeId).split(":")[1]}${e.level}`).join(" ");
         }
     }
     player.sendMessage(msg);
