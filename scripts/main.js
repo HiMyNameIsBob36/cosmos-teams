@@ -1,11 +1,14 @@
 import { world, system } from "@minecraft/server";
 
 // --- CONFIGURATION ---
-const CHAT_COOLDOWN = 1500; // 1.5 seconds in milliseconds
+const CHAT_COOLDOWN = 1500; 
 const lastChatTime = new Map();
 
+// Using beforeEvents allows us to cancel the message (important for commands and ranks)
+// If this still says undefined, double check that "Beta APIs" is ON in world settings.
 world.beforeEvents.chatSend.subscribe((event) => {
-    const { sender, message } = event;
+    const sender = event.sender;
+    const message = event.message;
     const now = Date.now();
 
     // 1. SPAM PROTECTION
@@ -13,15 +16,18 @@ world.beforeEvents.chatSend.subscribe((event) => {
         const diff = now - lastChatTime.get(sender.id);
         if (diff < CHAT_COOLDOWN) {
             event.cancel = true;
-            system.run(() => sender.sendMessage("§cPlease don't spam!"));
+            // Use system.run to send messages from within a 'before' event
+            system.run(() => {
+                sender.sendMessage("§cPlease don't spam!");
+            });
             return;
         }
     }
     lastChatTime.set(sender.id, now);
 
-    // 2. COMMAND SYSTEM (using "." instead of "/")
+    // 2. COMMAND SYSTEM (using ".")
     if (message.startsWith(".")) {
-        event.cancel = true; // Hide command from chat
+        event.cancel = true; 
         const args = message.slice(1).split(" ");
         const command = args[0].toLowerCase();
 
@@ -32,47 +38,47 @@ world.beforeEvents.chatSend.subscribe((event) => {
     }
 
     // 3. CHAT RANKS & COLORS
-    event.cancel = true; // Cancel original message to send formatted one
+    event.cancel = true; 
     let prefix = "§7[Member]§r ";
-    let nameColor = "§f"; // Default white
+    let nameColor = "§f"; 
 
     if (sender.hasTag("rank:admin")) prefix = "§4[Admin]§r ";
     else if (sender.hasTag("rank:mod")) prefix = "§b[Mod]§r ";
 
-    if (sender.hasTag("on_duty")) nameColor = "§a"; // Green name if on duty
+    if (sender.hasTag("on_duty")) nameColor = "§a"; 
 
-    world.sendMessage(`${prefix}${nameColor}${sender.name}§r: ${message}`);
+    // Broadcast the formatted message
+    system.run(() => {
+        world.sendMessage(`${prefix}${nameColor}${sender.name}§r: ${message}`);
+    });
 });
 
-// --- COMMAND HANDLER ---
 function handleCommand(player, cmd, args) {
-    // Permission Check
-    const isStaff = player.hasTag("rank:admin") || player.hasTag("rank:mod");
+    const isAdmin = player.hasTag("rank:admin");
+    const isMod = player.hasTag("rank:mod");
+    const isStaff = isAdmin || isMod;
 
     if (cmd === "duty" && isStaff) {
         if (player.hasTag("on_duty")) {
             player.removeTag("on_duty");
-            player.nameTag = player.name; // Reset name tag
-            player.sendMessage("§cShift ended. Name color reset.");
+            player.nameTag = player.name; 
+            player.sendMessage("§cShift ended.");
         } else {
             player.addTag("on_duty");
-            player.nameTag = `§a${player.name}`; // Set in-game name to green
-            player.sendMessage("§aShift started! Your name is now green.");
+            player.nameTag = `§a${player.name}`; 
+            player.sendMessage("§aShift started!");
         }
     }
 
-    if (cmd === "gm" && player.hasTag("rank:admin")) {
+    if (cmd === "gm" && isAdmin) {
         const mode = args[1] === "1" ? "creative" : "survival";
         player.runCommandAsync(`gamemode ${mode}`);
-        player.sendMessage(`§eGamemode set to ${mode}`);
     }
 
-    if (cmd === "ban" && player.hasTag("rank:admin")) {
+    if (cmd === "kick" && isAdmin) {
         const target = args[1];
         if (target) {
-            player.runCommandAsync(`kick "${target}" Banned by staff.`);
-            // Note: True 'Banning' in Bedrock usually requires a dedicated server script
-            // For standard worlds, Kick is the primary tool.
+            player.runCommandAsync(`kick "${target}"`);
         }
     }
 }
