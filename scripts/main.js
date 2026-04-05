@@ -22,7 +22,13 @@ function saveSettings(obj) {
 world.afterEvents.playerSpawn.subscribe((ev) => {
     const { player, initialSpawn } = ev;
     if (!initialSpawn) return;
+
     if (getSettings().joinMsg) world.sendMessage(`§7[§a+§7] §f${player.name} §7has joined!`);
+    
+    if (player.hasTag("rank:admin") || player.hasTag("rank:mod")) {
+        player.sendMessage("§bWelcome back! Use .help to see your staff tools.");
+    }
+
     const banTime = world.getDynamicProperty(`ban_${player.name}`);
     if (banTime && Date.now() < banTime) {
         system.run(() => {
@@ -76,22 +82,13 @@ function handleCommand(player, args) {
     const onDuty = player.hasTag("on_duty");
     const s = getSettings();
 
-    const validCmds = ["duty", "gm", "punish", "pardon", "sc", "tp", "view", "invsee", "settings", "help"];
+    const validCmds = ["duty", "gm", "punish", "pardon", "sc", "tp", "view", "invsee", "settings", "help", "log"];
     if (!validCmds.includes(cmd)) return player.sendMessage(`§cError: ".${cmd}" is not a command.`);
-    if (cmd !== "duty" && cmd !== "help" && cmd !== "settings" && isStaff && !onDuty) return player.sendMessage("§cYou must be .duty to use staff commands!");
+    if (!["duty", "help", "settings"].includes(cmd) && isStaff && !onDuty) return player.sendMessage("§cYou must be .duty to use staff commands!");
 
     switch (cmd) {
         case "help":
-            player.sendMessage("§b--- Command List ---");
-            player.sendMessage("§b.duty §7- Toggle staff shift");
-            player.sendMessage("§b.sc [msg] §7- Staff chat");
-            player.sendMessage("§b.gm [0-3] §7- Change gamemode");
-            player.sendMessage("§b.tp [player] §7- Teleport to player");
-            player.sendMessage("§b.punish [player] [type] [reason] §7- Punish user");
-            player.sendMessage("§b.view [player] §7- Check history");
-            player.sendMessage("§b.pardon [player] §7- Clear all data");
-            player.sendMessage("§b.invsee [player] §7- See inventory");
-            player.sendMessage("§b.settings [key] §7- Toggle features");
+            player.sendMessage("§b--- Command List ---\n§b.duty §7- Shift toggle\n§b.sc [msg] §7- Staff chat\n§b.gm [0-3] §7- Gamemode\n§b.tp [player] §7- Teleport\n§b.punish [player] [type] [reason]\n§b.view/log [player] §7- History\n§b.pardon [player] §7- Reset player\n§b.invsee [player] §7- Check inv\n§b.settings [key] §7- Configuration");
             break;
 
         case "duty":
@@ -114,27 +111,49 @@ function handleCommand(player, args) {
             break;
 
         case "tp":
-            if (!s.tp) return player.sendMessage("§cTeleport command is disabled.");
+            if (!s.tp) return player.sendMessage("§cDisabled.");
             const tpT = findTarget(args[1]);
             if (!tpT) return player.sendMessage("§cPlayer not found.");
             player.runCommand(`tp "${player.name}" "${tpT.name}"`);
             break;
 
         case "gm":
-            if (!isAdmin || !s.gm) return player.sendMessage("§cCommand disabled or no permission.");
+            if (!isAdmin || !s.gm) return player.sendMessage("§cBlocked.");
             const modes = { "0": "survival", "1": "creative", "2": "adventure", "3": "spectator" };
             if (!modes[args[1]]) return player.sendMessage("§cUsage: .gm [0-3]");
             player.runCommand(`gamemode ${modes[args[1]]}`);
             break;
 
+        case "invsee":
+            const invT = findTarget(args[1]);
+            if (!invT) return player.sendMessage("§cPlayer not found.");
+            const inv = invT.getComponent("inventory").container;
+            player.sendMessage(`§b- - - ${invT.name}'s Inventory - - -`);
+            for (let i = 0; i < inv.size; i++) {
+                const item = inv.getItem(i);
+                if (item) {
+                    let displayName = item.nameTag ? item.nameTag : item.typeId.split(":")[1].replace(/_/g, " ");
+                    let msg = `§bx${item.amount} §f${displayName} §7(${item.typeId})`;
+                    const enchants = item.getComponent("enchantable");
+                    if (enchants && enchants.getEnchantments().length > 0) {
+                        msg += " §d" + enchants.getEnchantments().map(e => `${e.type.id.split(":")[1]} ${e.level}`).join(", ");
+                    }
+                    player.sendMessage(msg);
+                }
+            }
+            break;
+
         case "punish":
-            if (!s.punish) return player.sendMessage("§cPunishments are disabled.");
+            if (!s.punish) return player.sendMessage("§cDisabled.");
             const pTarget = findTarget(args[1]);
             const pType = args[2];
             const reason = args.slice(3).join(" ") || "No reason";
             if (!pTarget || !["warn", "kick", "ban", "mute", "shadowmute", "tempban"].includes(pType)) return player.sendMessage("§cUsage: .punish [name] [type] [reason]");
+            
             let h = pTarget.getDynamicProperty("history") || "";
-            pTarget.setDynamicProperty("history", h + `§b[${pType.toUpperCase()}: ${reason}] `);
+            if (h === "CLEAN") h = "";
+            pTarget.setDynamicProperty("history", h + `${pType.toUpperCase()} - ${reason}\n`);
+            
             if (pType === "warn") {
                 let w = (pTarget.getDynamicProperty("warns") || 0) + 1;
                 pTarget.setDynamicProperty("warns", w);
@@ -147,17 +166,16 @@ function handleCommand(player, args) {
                 const time = parseInt(args[3]) || 60;
                 world.setDynamicProperty(`ban_${pTarget.name}`, Date.now() + (time * 60000));
                 player.runCommand(`kick "${pTarget.name}" §cTemp-banned: ${reason}`);
-            } else if (pType === "shadowmute") {
-                pTarget.setDynamicProperty("shadowMute", true);
-            } else if (pType === "mute") {
-                pTarget.setDynamicProperty("isMuted", true);
-            }
+            } else if (pType === "shadowmute") pTarget.setDynamicProperty("shadowMute", true);
+            else if (pType === "mute") pTarget.setDynamicProperty("isMuted", true);
             break;
 
         case "view":
+        case "log":
             const vT = findTarget(args[1]);
             if (!vT) return player.sendMessage("§cPlayer not found.");
-            player.sendMessage(`§bLog for ${vT.name}: §f${vT.getDynamicProperty("history") || "Clean"}`);
+            let logs = vT.getDynamicProperty("history") || "CLEAN";
+            player.sendMessage(`§b- - - Logs for ${vT.name} - - -\n§f${logs}`);
             break;
 
         case "pardon":
@@ -169,7 +187,7 @@ function handleCommand(player, args) {
                 parT.setDynamicProperty("warns", 0);
                 parT.setDynamicProperty("shadowMute", false);
                 parT.setDynamicProperty("isMuted", false);
-                parT.setDynamicProperty("history", "Clean");
+                parT.setDynamicProperty("history", "CLEAN");
             }
             player.sendMessage(`§bCleared all data for ${parName}`);
             break;
@@ -177,21 +195,15 @@ function handleCommand(player, args) {
         case "settings":
             if (!isAdmin) return;
             let sets = getSettings();
-            const key = args[1];
-            if (key === "spam") sets.spam = !sets.spam;
-            else if (key === "join") sets.joinMsg = !sets.joinMsg;
-            else if (key === "punish") sets.punish = !sets.punish;
-            else if (key === "ranks") sets.ranks = !sets.ranks;
-            else if (key === "gm") sets.gm = !sets.gm;
-            else if (key === "tp") sets.tp = !sets.tp;
+            const k = args[1];
+            if (k === "spam") sets.spam = !sets.spam;
+            else if (k === "join") sets.joinMsg = !sets.joinMsg;
+            else if (k === "punish") sets.punish = !sets.punish;
+            else if (k === "ranks") sets.ranks = !sets.ranks;
+            else if (k === "gm") sets.gm = !sets.gm;
+            else if (k === "tp") sets.tp = !sets.tp;
             saveSettings(sets);
-            player.sendMessage("§b--- Current Settings ---");
-            player.sendMessage(`§bSpam: ${sets.spam ? "§aON" : "§cOFF"}`);
-            player.sendMessage(`§bJoin/Leave: ${sets.joinMsg ? "§aON" : "§cOFF"}`);
-            player.sendMessage(`§bPunishments: ${sets.punish ? "§aON" : "§cOFF"}`);
-            player.sendMessage(`§bRanks: ${sets.ranks ? "§aON" : "§cOFF"}`);
-            player.sendMessage(`§bGamemode: ${sets.gm ? "§aON" : "§cOFF"}`);
-            player.sendMessage(`§bTeleport: ${sets.tp ? "§aON" : "§cOFF"}`);
+            player.sendMessage("§b--- Settings ---\n" + Object.entries(sets).map(([key, val]) => `§b${key}: ${val ? "§aON" : "§cOFF"}`).join("\n"));
             break;
     }
 }
