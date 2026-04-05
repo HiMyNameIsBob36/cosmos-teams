@@ -22,13 +22,8 @@ function saveSettings(obj) {
 world.afterEvents.playerSpawn.subscribe((ev) => {
     const { player, initialSpawn } = ev;
     if (!initialSpawn) return;
-
     if (getSettings().joinMsg) world.sendMessage(`§7[§a+§7] §f${player.name} §7has joined!`);
-    
-    if (player.hasTag("rank:admin") || player.hasTag("rank:mod")) {
-        player.sendMessage("§bWelcome back! Use .help to see your staff tools.");
-    }
-
+    if (player.hasTag("rank:admin") || player.hasTag("rank:mod")) player.sendMessage("§bWelcome back! Use .help to see your staff tools.");
     const banTime = world.getDynamicProperty(`ban_${player.name}`);
     if (banTime && Date.now() < banTime) {
         system.run(() => {
@@ -46,26 +41,22 @@ world.beforeEvents.chatSend.subscribe((ev) => {
     const player = ev.sender;
     const msg = ev.message;
     const settings = getSettings();
-
     if (player.getDynamicProperty("shadowMute")) {
         ev.cancel = true;
         system.run(() => player.sendMessage(`§f${player.name}: ${msg}`));
         return;
     }
-
     if (settings.spam && lastChat.has(player.id) && Date.now() - lastChat.get(player.id) < 1500) {
         ev.cancel = true;
         system.run(() => player.sendMessage("§cSlow down!"));
         return;
     }
     lastChat.set(player.id, Date.now());
-
     if (msg.startsWith(".")) {
         ev.cancel = true;
         system.run(() => handleCommand(player, msg.slice(1).split(" ")));
         return;
     }
-
     if (settings.ranks) {
         ev.cancel = true;
         let prefix = player.hasTag("rank:admin") ? "§4[Admin]§r " : (player.hasTag("rank:mod") ? "§b[Mod]§r " : "§7[Member]§r ");
@@ -88,7 +79,7 @@ function handleCommand(player, args) {
 
     switch (cmd) {
         case "help":
-            player.sendMessage("§b--- Command List ---\n§b.duty §7- Shift toggle\n§b.sc [msg] §7- Staff chat\n§b.gm [0-3] §7- Gamemode\n§b.tp [player] §7- Teleport\n§b.punish [player] [type] [reason]\n§b.view/log [player] §7- History\n§b.pardon [player] §7- Reset player\n§b.invsee [player] §7- Check inv\n§b.settings [key] §7- Configuration");
+            player.sendMessage("§b--- Command List ---\n§b.duty §7- Shift\n§b.sc [msg] §7- Staff chat\n§b.gm [0-3] §7- Gamemode\n§b.tp [player] §7- Teleport\n§b.punish [player] [type] [reason]\n§b.log [player] §7- History\n§b.pardon [player] §7- Reset\n§b.invsee [player] §7- Check inv\n§b.settings [key] §7- Config");
             break;
 
         case "duty":
@@ -135,8 +126,11 @@ function handleCommand(player, args) {
                     let displayName = item.nameTag ? item.nameTag : item.typeId.split(":")[1].replace(/_/g, " ");
                     let msg = `§bx${item.amount} §f${displayName} §7(${item.typeId})`;
                     const enchants = item.getComponent("enchantable");
-                    if (enchants && enchants.getEnchantments().length > 0) {
-                        msg += " §d" + enchants.getEnchantments().map(e => `${e.type.id.split(":")[1]} ${e.level}`).join(", ");
+                    if (enchants) {
+                        const enchList = enchants.getEnchantments();
+                        if (enchList.length > 0) {
+                            msg += " §d" + enchList.map(e => `${e.type.id.split(":")[1]}${e.level}`).join(" ");
+                        }
                     }
                     player.sendMessage(msg);
                 }
@@ -158,6 +152,7 @@ function handleCommand(player, args) {
                 let w = (pTarget.getDynamicProperty("warns") || 0) + 1;
                 pTarget.setDynamicProperty("warns", w);
                 world.sendMessage(`§b[Staff] §f${pTarget.name} warned (${w}/8).`);
+                player.sendMessage(`§bSuccessfully warned ${pTarget.name}!`);
                 if (w >= 8 && s.autoBan) {
                     world.setDynamicProperty(`ban_${pTarget.name}`, Date.now() + 31536000000);
                     player.runCommand(`kick "${pTarget.name}" §c8 Warnings reached.`);
@@ -175,7 +170,7 @@ function handleCommand(player, args) {
             const vT = findTarget(args[1]);
             if (!vT) return player.sendMessage("§cPlayer not found.");
             let logs = vT.getDynamicProperty("history") || "CLEAN";
-            player.sendMessage(`§b- - - Logs for ${vT.name} - - -\n§f${logs}`);
+            player.sendMessage(`§b--- ${vT.name}'s Logs ---\n§f${logs}`);
             break;
 
         case "pardon":
