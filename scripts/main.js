@@ -87,7 +87,7 @@ world.beforeEvents.chatSend.subscribe((data) => {
                     settings: { tp: true, homes: true }
                 };
                 saveTeams(teams);
-                sender.sendMessage(`§l§a+§r§fTeam '${name}' created!`);
+                sender.sendMessage(`§l§a+§r§f Team '${name}' created!`);
                 break;
 
             case "list":
@@ -108,7 +108,7 @@ world.beforeEvents.chatSend.subscribe((data) => {
 
             case "invites":
                 if (!team || !team.managers.includes(sender.name)) return sender.sendMessage("§cManager only.");
-                sender.sendMessage(`§l§s--- Pending Requests -- §f${team.requests.join(", ") || "None"}`);
+                sender.sendMessage(`§l§s--- Pending Requests --- §r§fn\${team.requests.join(", ") || "None"}`);
                 break;
 
             case "accept":
@@ -119,7 +119,7 @@ world.beforeEvents.chatSend.subscribe((data) => {
                 if (cmd === "accept") team.members.push(reqUser);
                 team.requests = team.requests.filter(r => r !== reqUser);
                 saveTeams(teams);
-                sender.sendMessage(`§a${cmd === "accept" ? "§a§l+§r§f Accepted!" : "§c§l-§r§f Declined."} ${reqUser}.`);
+                sender.sendMessage(`§a${cmd === "accept" ? "§a§l+§r§f Accepted" : "§c§l-§r§f Declined"} ${reqUser} to the team.`);
                 break;
 
             case "tp":
@@ -143,6 +143,7 @@ world.beforeEvents.chatSend.subscribe((data) => {
                 } else {
                     if (!team.home || !team.settings.homes) return sender.sendMessage("§c§l-§r§f Home unavailable.");
                     sender.teleport(team.home);
+                    sender.sendMessage("§a§l+§r§f Teleported to home.");
                 }
                 break;
 
