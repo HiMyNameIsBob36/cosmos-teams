@@ -1,6 +1,6 @@
-import { world, system, Player } from "@minecraft/server";
+import { world, system } from "@minecraft/server";
 
-// --- Data Management ---
+// --- Database Logic ---
 function getTeams() {
     const raw = world.getDynamicProperty("cosmos_teams");
     return raw ? JSON.parse(raw) : {};
@@ -10,36 +10,57 @@ function saveTeams(teams) {
     world.setDynamicProperty("cosmos_teams", JSON.stringify(teams));
 }
 
-// --- Helper: Fuzzy Name Search ---
-function findMember(team, inputName) {
+// --- Helper: Fuzzy Name & Player Search ---
+function findMemberInTeam(team, inputName) {
+    if (!inputName) return null;
     return team.members.find(m => m.toLowerCase().includes(inputName.toLowerCase()));
 }
 
-// --- Join Message ---
+function sendFullHelp(player) {
+    player.sendMessage("§l§b--- Cosmos Teams: Full Command List ---");
+    player.sendMessage("§e.team §7- Show this list (Note: You can only be in 1 team)");
+    player.sendMessage("§e.team list §7- View all teams and members");
+    player.sendMessage("§e.team create {name} §7- Start your own team");
+    player.sendMessage("§e.team request {team} §7- Request to join a team");
+    player.sendMessage("§e.team leave §7- Exit your current team");
+    player.sendMessage("§e.team disband §7- Delete team (Owner only)");
+    player.sendMessage("§b-- Management --");
+    player.sendMessage("§e.team tp {user} §7- Teleport to teammate");
+    player.sendMessage("§e.team kick {user} §7- Remove member (Manager+)");
+    player.sendMessage("§e.team manager {user} §7- Promote to Manager (Owner only)");
+    player.sendMessage("§e.team transfer {user} §7- Change Owner (Owner only)");
+    player.sendMessage("§e.team invites §7- List pending requests");
+    player.sendMessage("§e.team accept/decline {user} §7- Manage requests");
+    player.sendMessage("§b-- Extra --");
+    player.sendMessage("§e.team home §7- TP to team home");
+    player.sendMessage("§e.team home set §7- Set home at current spot (Owner)");
+    player.sendMessage("§e.team chat §7- Toggle private team chat");
+    player.sendMessage("§e.team settings §7- Toggle team features (Owner)");
+}
+
+// --- Join Notification ---
 world.afterEvents.playerSpawn.subscribe((ev) => {
     if (ev.initialSpawn) {
-        ev.player.sendMessage("§b[Cosmos] §fNever used Cosmos Teams before? Type §e.team§f in chat!");
+        ev.player.sendMessage("§b[Cosmos] §fNever used Cosmos Teams before? Type §e'.team'§f in chat!");
     }
 });
 
-// --- Chat Command Handler ---
+// --- Chat Command Interceptor ---
 world.beforeEvents.chatSend.subscribe((data) => {
     const { sender, message } = data;
-    
-    // Team Chat Logic
     const teams = getTeams();
     const myTeamName = Object.keys(teams).find(n => teams[n].members.includes(sender.name));
-    
+
+    // Team Chat Toggle Logic
     if (sender.hasTag("teamChat") && !message.startsWith(".")) {
         data.cancel = true;
         if (!myTeamName) {
             sender.removeTag("teamChat");
-            sender.sendMessage("§cYou aren't in a team. Team chat disabled.");
             return;
         }
-        const team = teams[myTeamName];
-        world.getAllPlayers().filter(p => team.members.includes(p.name)).forEach(p => {
-            p.sendMessage(`§b[Team Chat] §7${sender.name}: §f${message}`);
+        const teamMembers = teams[myTeamName].members;
+        world.getAllPlayers().filter(p => teamMembers.includes(p.name)).forEach(p => {
+            p.sendMessage(`§b[Team Chat] §f${sender.name}: ${message}`);
         });
         return;
     }
@@ -48,113 +69,152 @@ world.beforeEvents.chatSend.subscribe((data) => {
     data.cancel = true;
 
     const args = message.split(" ");
-    const cmd = args[1];
+    const cmd = args[1]?.toLowerCase();
 
     system.run(() => {
-        handleCommand(sender, args, cmd, teams, myTeamName);
+        const team = teams[myTeamName];
+        
+        switch (cmd) {
+            case "create":
+                if (myTeamName) return sender.sendMessage("§cError: You are already in a team!");
+                const name = args[2];
+                if (!name) return sender.sendMessage("§cUsage: .team create {name}");
+                teams[name] = { 
+                    owner: sender.name, 
+                    managers: [sender.name], 
+                    members: [sender.name], 
+                    requests: [], 
+                    home: null,
+                    settings: { tp: true, homes: true }
+                };
+                saveTeams(teams);
+                sender.sendMessage(`§aSuccess: Team '${name}' created!`);
+                break;
+
+            case "list":
+                sender.sendMessage("§b--- All Teams ---");
+                for (const [n, t] of Object.entries(teams)) {
+                    sender.sendMessage(`§e${n}: §f${t.members.join(", ")}`);
+                }
+                break;
+
+            case "request":
+                if (myTeamName) return sender.sendMessage("§cError: Leave your team first.");
+                const targetT = teams[args[2]];
+                if (!targetT) return sender.sendMessage("§cError: Team not found.");
+                if (!targetT.requests.includes(sender.name)) targetT.requests.push(sender.name);
+                saveTeams(teams);
+                sender.sendMessage("§aRequest sent!");
+                break;
+
+            case "invites":
+                if (!team || !team.managers.includes(sender.name)) return sender.sendMessage("§cManager only.");
+                sender.sendMessage(`§bPending Requests: §f${team.requests.join(", ") || "None"}`);
+                break;
+
+            case "accept":
+            case "decline":
+                if (!team || !team.managers.includes(sender.name)) return sender.sendMessage("§cManager only.");
+                const reqUser = findMemberInTeam({ members: team.requests }, args[2]);
+                if (!reqUser) return sender.sendMessage("§cUser not found in requests.");
+                if (cmd === "accept") team.members.push(reqUser);
+                team.requests = team.requests.filter(r => r !== reqUser);
+                saveTeams(teams);
+                sender.sendMessage(`§a${cmd === "accept" ? "Accepted" : "Declined"} ${reqUser}.`);
+                break;
+
+            case "tp":
+                if (!team) return sender.sendMessage("§cNo team.");
+                if (!team.settings.tp) return sender.sendMessage("§cTeleporting is disabled for this team.");
+                const tpTarget = findMemberInTeam(team, args[2]);
+                const pTarget = world.getAllPlayers().find(p => p.name === tpTarget);
+                if (pTarget) {
+                    sender.teleport(pTarget.location);
+                    sender.sendMessage(`§aTeleported to ${tpTarget}`);
+                } else sender.sendMessage("§cPlayer not online.");
+                break;
+
+            case "home":
+                if (!team) return sender.sendMessage("§cNo team.");
+                if (args[2] === "set") {
+                    if (team.owner !== sender.name) return sender.sendMessage("§cOwner only.");
+                    team.home = { x: sender.location.x, y: sender.location.y, z: sender.location.z };
+                    saveTeams(teams);
+                    sender.sendMessage("§aHome location saved!");
+                } else {
+                    if (!team.home || !team.settings.homes) return sender.sendMessage("§cHome unavailable.");
+                    sender.teleport(team.home);
+                }
+                break;
+
+            case "kick":
+                if (!team || !team.managers.includes(sender.name)) return sender.sendMessage("§cManager only.");
+                const kickName = findMemberInTeam(team, args[2]);
+                if (kickName === team.owner) return sender.sendMessage("§cCannot kick owner.");
+                team.members = team.members.filter(m => m !== kickName);
+                team.managers = team.managers.filter(m => m !== kickName);
+                saveTeams(teams);
+                sender.sendMessage(`§eKicked ${kickName}.`);
+                break;
+
+            case "manager":
+                if (!team || team.owner !== sender.name) return sender.sendMessage("§cOwner only.");
+                const manName = findMemberInTeam(team, args[2]);
+                if (manName && !team.managers.includes(manName)) team.managers.push(manName);
+                saveTeams(teams);
+                sender.sendMessage(`§a${manName} is now a Manager.`);
+                break;
+
+            case "transfer":
+                if (!team || team.owner !== sender.name) return sender.sendMessage("§cOwner only.");
+                const newOwner = findMemberInTeam(team, args[2]);
+                if (newOwner) {
+                    team.owner = newOwner;
+                    if (!team.managers.includes(newOwner)) team.managers.push(newOwner);
+                    saveTeams(teams);
+                    sender.sendMessage(`§aTransferred ownership to ${newOwner}.`);
+                }
+                break;
+
+            case "settings":
+                if (!team || team.owner !== sender.name) return sender.sendMessage("§cOwner only.");
+                team.settings.tp = !team.settings.tp;
+                team.settings.homes = !team.settings.homes;
+                saveTeams(teams);
+                sender.sendMessage(`§bTeam Features: TP(${team.settings.tp}), Homes(${team.settings.homes})`);
+                break;
+
+            case "chat":
+                if (!myTeamName) return sender.sendMessage("§cNo team.");
+                if (sender.hasTag("teamChat")) {
+                    sender.removeTag("teamChat");
+                    sender.sendMessage("§eTeam Chat: OFF");
+                } else {
+                    sender.addTag("teamChat");
+                    sender.sendMessage("§bTeam Chat: ON");
+                }
+                break;
+
+            case "leave":
+                if (!team) return;
+                if (team.owner === sender.name) return sender.sendMessage("§cUse '.team disband' to delete the team.");
+                team.members = team.members.filter(m => m !== sender.name);
+                team.managers = team.managers.filter(m => m !== sender.name);
+                saveTeams(teams);
+                sender.sendMessage("§eLeft team.");
+                break;
+
+            case "disband":
+                if (!team || team.owner !== sender.name) return sender.sendMessage("§cOwner only.");
+                if (args[2] !== "confirm") return sender.sendMessage("§6Type '.team disband confirm' to delete your team!");
+                delete teams[myTeamName];
+                saveTeams(teams);
+                sender.sendMessage("§4Team disbanded.");
+                break;
+
+            default:
+                sendFullHelp(sender);
+                break;
+        }
     });
 });
-
-function handleCommand(player, args, cmd, teams, myTeamName) {
-    const team = teams[myTeamName];
-
-    switch (cmd) {
-        case "create":
-            if (myTeamName) return player.sendMessage("§cYou are already in a team!");
-            const newName = args[2];
-            if (!newName) return player.sendMessage("§cUsage: .team create <name>");
-            teams[newName] = { owner: player.name, managers: [player.name], members: [player.name], requests: [], home: null, settings: { tp: true, homes: true } };
-            saveTeams(teams);
-            player.sendMessage(`§aTeam '${newName}' created!`);
-            break;
-
-        case "list":
-            player.sendMessage("§b--- Active Teams ---");
-            Object.keys(teams).forEach(n => player.sendMessage(`§e${n} §7(${teams[n].members.length} members)`));
-            break;
-
-        case "request":
-            if (myTeamName) return player.sendMessage("§cLeave your team first.");
-            const targetTeam = teams[args[2]];
-            if (!targetTeam) return player.sendMessage("§cTeam not found.");
-            if (!targetTeam.requests.includes(player.name)) {
-                targetTeam.requests.push(player.name);
-                saveTeams(teams);
-                player.sendMessage("§aRequest sent!");
-            }
-            break;
-
-        case "accept":
-            if (!team || !team.managers.includes(player.name)) return player.sendMessage("§cManager only.");
-            const userToJoin = findMember({members: team.requests}, args[2]);
-            if (userToJoin) {
-                team.members.push(userToJoin);
-                team.requests = team.requests.filter(r => r !== userToJoin);
-                saveTeams(teams);
-                player.sendMessage(`§aAccepted ${userToJoin}.`);
-            }
-            break;
-
-        case "home":
-            if (!team) return player.sendMessage("§cNo team.");
-            if (args[2] === "set") {
-                if (team.owner !== player.name) return player.sendMessage("§cOwner only.");
-                team.home = { x: player.location.x, y: player.location.y, z: player.location.z };
-                saveTeams(teams);
-                player.sendMessage("§aTeam home set!");
-            } else {
-                if (!team.home) return player.sendMessage("§cNo home set.");
-                player.teleport(team.home);
-                player.sendMessage("§aTeleported home.");
-            }
-            break;
-
-        case "tp":
-            if (!team) return player.sendMessage("§cNo team.");
-            const targetName = findMember(team, args[2]);
-            const targetPlayer = world.getAllPlayers().find(p => p.name === targetName);
-            if (targetPlayer) {
-                player.teleport(targetPlayer.location);
-                player.sendMessage(`§aTeleported to ${targetName}.`);
-            }
-            break;
-
-        case "chat":
-            if (player.hasTag("teamChat")) {
-                player.removeTag("teamChat");
-                player.sendMessage("§eTeam chat toggled OFF.");
-            } else {
-                player.addTag("teamChat");
-                player.sendMessage("§bTeam chat toggled ON.");
-            }
-            break;
-
-        case "leave":
-            if (!team) return;
-            if (team.owner === player.name) {
-                player.sendMessage("§cUse '.team disband' if you want to delete the team.");
-            } else {
-                team.members = team.members.filter(m => m !== player.name);
-                team.managers = team.managers.filter(m => m !== player.name);
-                saveTeams(teams);
-                player.sendMessage("§eLeft team.");
-            }
-            break;
-
-        case "disband":
-            if (!team || team.owner !== player.name) return player.sendMessage("§cOwner only.");
-            delete teams[myTeamName];
-            saveTeams(teams);
-            player.sendMessage("§4Team disbanded.");
-            break;
-
-        default:
-            player.sendMessage("§l§bCosmos Teams Help");
-            player.sendMessage("§e.team create <name> §7- Start a team");
-            player.sendMessage("§e.team request <team> §7- Join a team");
-            player.sendMessage("§e.team home (set) §7- Team TP");
-            player.sendMessage("§e.team chat §7- Toggle team messages");
-            player.sendMessage("§7Note: You can only be in 1 team at a time.");
-            break;
-    }
-}
