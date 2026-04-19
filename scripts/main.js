@@ -25,7 +25,7 @@ function playSound(player, sound, pitch = 1) {
 }
 
 function sendFullHelp(player) {
-    player.sendMessage("§l§s--- Cosmos Teams Command List ---");
+    player.sendMessage("§l§s--- Cosmic Teams Command List ---");
     player.sendMessage("§s.team §7- Shows the list of commands!");
     player.sendMessage("§s.team list §7- View all teams and its members");
     player.sendMessage("§s.team info {user} §7- View teammate coords/health");
@@ -44,7 +44,7 @@ function sendFullHelp(player) {
     player.sendMessage("§s.team home §7- Teleport to the team home");
     player.sendMessage("§s.team home set §7- Set home at current spot §7[§sOwner+§7]");
     player.sendMessage("§s.team chat §7- Toggle private team chat");
-    player.sendMessage("§o§7v2.0 §r- samlikesspace.dev");
+    player.sendMessage("§o§7v2.0 §r- Added a combat system, info command & more!");
 }
 
 // --- Combat Events ---
@@ -65,7 +65,7 @@ world.afterEvents.entityDie.subscribe((ev) => {
 // --- Join Notification ---
 world.afterEvents.playerSpawn.subscribe((ev) => {
     if (ev.initialSpawn) {
-        ev.player.sendMessage("§7[§s§lCOSMOS TEAMS§r§7] §fNever used Cosmos Teams before? Type §s'.team'§f in chat!");
+        ev.player.sendMessage("§7[§s§lCOSMIC TEAMS§r§7] §fNever used Cosmic Teams before? Type §s'.team'§f in chat!");
     }
 });
 
@@ -98,7 +98,7 @@ world.beforeEvents.chatSend.subscribe((data) => {
         // Combat Check
         if (combatTimers.has(sender.name) && system.currentTick < combatTimers.get(sender.name)) {
             playSound(sender, "note.bass", 0.5);
-            return sender.sendMessage("§l§c- §r§fYou are in combat! Commands are locked.");
+            return sender.sendMessage("§l§cx §r§fYou are in combat! Commands are locked.");
         }
 
         const team = teams[myTeamName];
